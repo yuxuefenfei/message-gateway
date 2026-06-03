@@ -12,14 +12,19 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.handler.timeout.IdleState;
 import io.netty.handler.timeout.IdleStateEvent;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 
 import java.time.Instant;
 
+/**
+ * 网关核心快路径处理器。
+ *
+ * <p>该 handler 运行在 Netty IO 线程，职责保持轻量：
+ * 连接鉴权、认证前拦截、PING/PONG 心跳、空闲关闭以及将 BIZ_REPORT 转发给后续业务 handler。
+ * 业务上报的实际处理不在这里执行，避免高频业务逻辑拖慢 IO 线程。</p>
+ */
+@Slf4j
 public final class GatewayPushHandler extends SimpleChannelInboundHandler<Frame> {
-    private static final Logger log = LoggerFactory.getLogger(GatewayPushHandler.class);
-
     private final SessionRegistry sessionRegistry;
     private final TokenAuthenticator authenticator;
     private final GatewayMetrics metrics;

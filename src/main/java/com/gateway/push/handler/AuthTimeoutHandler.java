@@ -5,16 +5,21 @@ import com.gateway.push.metrics.GatewayMetrics;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.http.websocketx.WebSocketServerProtocolHandler;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 
 import java.time.Duration;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * CONNECT 鉴权超时处理器。
+ *
+ * <p>WebSocket 握手成功只代表底层连接建立，并不代表业务身份可信。
+ * 本 handler 在握手完成后启动一个定时任务，如果客户端没有在规定时间内发送
+ * CONNECT 并完成认证，就关闭连接，防止未认证连接长期占用文件描述符和内存。</p>
+ */
+@Slf4j
 public final class AuthTimeoutHandler extends ChannelInboundHandlerAdapter {
-    private static final Logger log = LoggerFactory.getLogger(AuthTimeoutHandler.class);
-
     private final SessionRegistry sessionRegistry;
     private final Duration connectTimeout;
     private final GatewayMetrics metrics;

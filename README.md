@@ -2,14 +2,20 @@
 
 基于 Netty 与 Protobuf 的独立 WebSocket 推送网关实现。
 
+项目使用 Lombok 简化 Java 样板代码：`@Slf4j` 生成日志字段，`@Getter` 生成配置访问器，
+`@RequiredArgsConstructor` 生成依赖注入构造器，`@Value` 生成不可变指标快照。
+源码中已补充中文注释，重点说明协议职责、线程模型、会话生命周期、背压和指标语义。
+
 ## 已实现能力
 
 - 使用 `src/main/proto/push.proto` 定义统一顶级 `Frame`，覆盖 `PING`、`PONG`、`CONNECT`、`CONNECT_ACK`、`NOTIFY`、`BIZ_REPORT`。
 - 使用 `WebSocketProtobufDecoder` 将 `BinaryWebSocketFrame` 解码为 Protobuf `Frame`。
 - 使用 `WebSocketProtobufEncoder` 将 Protobuf `Frame` 编码为 WebSocket 二进制帧。
-- 使用 `GatewayPushHandler` 处理连接鉴权、本地会话映射、业务心跳、业务上报和连接清理。
+- 使用 `GatewayPushHandler` 处理连接鉴权、本地会话映射、认证前拦截、业务心跳和连接清理。
+- 使用 `BizReportHandler` 将 `BIZ_REPORT` 上报交给独立业务线程池处理，避免阻塞 Netty IO 线程。
 - 在 Netty pipeline 中加入 `IdleStateHandler`，默认 90 秒无读事件即关闭连接。
 - 提供 `PushService`，可向已绑定的 `clientId` 推送 `Notification`。
+- 提供 `GatewayMetrics` 扩展点和 `InMemoryGatewayMetrics` 内存计数实现，便于压测与生产监控接入。
 
 ## 目录结构
 
@@ -21,11 +27,16 @@ src/main/java/com/gateway/push
   codec       WebSocket 与 Protobuf 编解码器
   config      网关配置
   handler     核心业务处理器
+  metrics     指标接口与内存指标实现
   server      Netty 启动与 pipeline 配置
   session     本地会话注册表与推送服务
 src/test/java/com/gateway/push
   codec       编解码测试
+  config      配置校验测试
   handler     业务处理器测试
+  metrics     指标快照测试
+  server      真实 WebSocket 端到端测试
+  session     会话与推送测试
 ```
 
 ## 构建与运行
@@ -38,7 +49,8 @@ java -jar target/message-gateway-1.0.0-SNAPSHOT.jar
 
 默认监听地址为 `ws://localhost:8080/ws`。
 
-测试覆盖编解码、连接鉴权、心跳响应、空闲断开，以及一次真实 Netty WebSocket 客户端到服务端的 Protobuf 端到端通信。
+测试覆盖编解码、连接鉴权、认证超时、心跳响应、空闲断开、未认证帧拦截、业务线程池隔离、
+背压拒绝、批量推送、会话清理、指标快照，以及真实 Netty WebSocket 客户端到服务端的 Protobuf 端到端通信。
 
 可通过系统属性调整运行参数：
 

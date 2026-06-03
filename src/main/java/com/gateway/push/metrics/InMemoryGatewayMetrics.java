@@ -1,7 +1,15 @@
 package com.gateway.push.metrics;
 
+import lombok.Value;
+
 import java.util.concurrent.atomic.LongAdder;
 
+/**
+ * 基于内存计数器的指标实现。
+ *
+ * <p>该实现使用 LongAdder，在高并发下比 AtomicLong 更适合做热点计数。
+ * 它适合本地压测、单机观测或尚未接入 Micrometer/Prometheus 前的过渡阶段。</p>
+ */
 public final class InMemoryGatewayMetrics implements GatewayMetrics {
     private final LongAdder authenticatedChannels = new LongAdder();
     private final LongAdder unauthenticatedFrameRejects = new LongAdder();
@@ -79,80 +87,22 @@ public final class InMemoryGatewayMetrics implements GatewayMetrics {
         );
     }
 
-    public static final class Snapshot {
-        private final long authenticatedChannels;
-        private final long unauthenticatedFrameRejects;
-        private final long authTimeoutCloses;
-        private final long idleCloses;
-        private final long decodeFailures;
-        private final long bizReportsAccepted;
-        private final long bizReportsFailed;
-        private final long pushSuccesses;
-        private final long pushFailures;
-        private final long pushBackpressureRejects;
-
-        private Snapshot(
-                long authenticatedChannels,
-                long unauthenticatedFrameRejects,
-                long authTimeoutCloses,
-                long idleCloses,
-                long decodeFailures,
-                long bizReportsAccepted,
-                long bizReportsFailed,
-                long pushSuccesses,
-                long pushFailures,
-                long pushBackpressureRejects
-        ) {
-            this.authenticatedChannels = authenticatedChannels;
-            this.unauthenticatedFrameRejects = unauthenticatedFrameRejects;
-            this.authTimeoutCloses = authTimeoutCloses;
-            this.idleCloses = idleCloses;
-            this.decodeFailures = decodeFailures;
-            this.bizReportsAccepted = bizReportsAccepted;
-            this.bizReportsFailed = bizReportsFailed;
-            this.pushSuccesses = pushSuccesses;
-            this.pushFailures = pushFailures;
-            this.pushBackpressureRejects = pushBackpressureRejects;
-        }
-
-        public long getAuthenticatedChannels() {
-            return authenticatedChannels;
-        }
-
-        public long getUnauthenticatedFrameRejects() {
-            return unauthenticatedFrameRejects;
-        }
-
-        public long getAuthTimeoutCloses() {
-            return authTimeoutCloses;
-        }
-
-        public long getIdleCloses() {
-            return idleCloses;
-        }
-
-        public long getDecodeFailures() {
-            return decodeFailures;
-        }
-
-        public long getBizReportsAccepted() {
-            return bizReportsAccepted;
-        }
-
-        public long getBizReportsFailed() {
-            return bizReportsFailed;
-        }
-
-        public long getPushSuccesses() {
-            return pushSuccesses;
-        }
-
-        public long getPushFailures() {
-            return pushFailures;
-        }
-
-        public long getPushBackpressureRejects() {
-            return pushBackpressureRejects;
-        }
+    /**
+     * 指标快照。
+     *
+     * <p>使用 Lombok @Value 生成不可变字段、构造器和 getter，调用方拿到快照后不会受后续计数变化影响。</p>
+     */
+    @Value
+    public static class Snapshot {
+        long authenticatedChannels;
+        long unauthenticatedFrameRejects;
+        long authTimeoutCloses;
+        long idleCloses;
+        long decodeFailures;
+        long bizReportsAccepted;
+        long bizReportsFailed;
+        long pushSuccesses;
+        long pushFailures;
+        long pushBackpressureRejects;
     }
 }

@@ -16,15 +16,20 @@ import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.util.concurrent.DefaultEventExecutorGroup;
 import io.netty.util.concurrent.EventExecutorGroup;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.extern.slf4j.Slf4j;
 
 import java.net.InetSocketAddress;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * Netty 推送网关服务启动器。
+ *
+ * <p>负责创建 boss/worker 事件循环、业务线程池、服务端 bootstrap 以及停服资源释放。
+ * 该类不直接处理业务协议，具体协议处理交给 {@link GatewayChannelInitializer}
+ * 装配出的 pipeline。</p>
+ */
+@Slf4j
 public final class GatewayServer {
-    private static final Logger log = LoggerFactory.getLogger(GatewayServer.class);
-
     private final GatewayConfig config;
     private final SessionRegistry sessionRegistry;
     private final TokenAuthenticator authenticator;

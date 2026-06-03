@@ -5,21 +5,22 @@ import com.gateway.push.protocol.Frame;
 import com.gateway.push.session.SessionRegistry;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
+/**
+ * 业务上报处理器。
+ *
+ * <p>该 handler 只处理 BIZ_REPORT 帧，并在 pipeline 中被挂载到独立业务线程池。
+ * 这样即使后续的 BizReportSink 接入 Kafka、队列或其它业务系统，也不会阻塞
+ * Netty IO 线程上的心跳、鉴权与网络读写。</p>
+ */
+@Slf4j
+@RequiredArgsConstructor
 public final class BizReportHandler extends SimpleChannelInboundHandler<Frame> {
-    private static final Logger log = LoggerFactory.getLogger(BizReportHandler.class);
-
     private final SessionRegistry sessionRegistry;
     private final BizReportSink bizReportSink;
     private final GatewayMetrics metrics;
-
-    public BizReportHandler(SessionRegistry sessionRegistry, BizReportSink bizReportSink, GatewayMetrics metrics) {
-        this.sessionRegistry = sessionRegistry;
-        this.bizReportSink = bizReportSink;
-        this.metrics = metrics;
-    }
 
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, Frame frame) {

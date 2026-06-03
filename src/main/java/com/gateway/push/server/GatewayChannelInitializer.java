@@ -20,6 +20,13 @@ import io.netty.util.concurrent.EventExecutorGroup;
 
 import java.util.concurrent.TimeUnit;
 
+/**
+ * 单个客户端连接的 Netty pipeline 装配器。
+ *
+ * <p>pipeline 顺序遵循：HTTP 握手编解码 -> WebSocket 协议升级 -> CONNECT 超时保护 ->
+ * Protobuf 编解码 -> 网关快路径处理 -> 业务上报处理。BIZ_REPORT handler 可挂在独立业务线程池，
+ * 从而把高频业务上报与 IO 线程隔离。</p>
+ */
 public final class GatewayChannelInitializer extends ChannelInitializer<SocketChannel> {
     private final GatewayConfig config;
     private final SessionRegistry sessionRegistry;
