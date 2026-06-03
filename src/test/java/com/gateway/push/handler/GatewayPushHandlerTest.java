@@ -11,6 +11,7 @@ import io.netty.handler.timeout.IdleStateEvent;
 import org.junit.jupiter.api.Test;
 
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -129,6 +130,52 @@ class GatewayPushHandlerTest {
 
         assertFalse(channel.isActive());
         assertFalse(channel.outboundMessages().iterator().hasNext());
+        channel.finishAndReleaseAll();
+    }
+
+    @Test
+    void closesUnsupportedFrameFromAuthenticatedClient() {
+        SessionRegistry registry = new SessionRegistry();
+        AtomicInteger unsupportedRejects = new AtomicInteger();
+        EmbeddedChannel channel = new EmbeddedChannel(
+                new GatewayPushHandler(registry, TokenAuthenticator.nonBlankToken(), new com.gateway.push.metrics.GatewayMetrics() {
+                    @Override
+                    public void unsupportedFrameRejected() {
+                        unsupportedRejects.incrementAndGet();
+                    }
+                }));
+        registry.bind("client-unsupported", channel);
+
+        channel.writeInbound(Frame.newBuilder()
+                .setType(Frame.Type.TYPE_UNSPECIFIED)
+                .build());
+
+        assertFalse(channel.isActive());
+        assertEquals(1, unsupportedRejects.get());
+        channel.finishAndReleaseAll();
+    }
+
+    @Test
+    void closesUnauthenticatedBusinessReportWhenHandlerIsUsedDirectly() {
+        AtomicInteger unauthenticatedRejects = new AtomicInteger();
+        EmbeddedChannel channel = new EmbeddedChannel(new BizReportHandler(
+                new SessionRegistry(),
+                (clientId, reportData) -> {
+                },
+                new com.gateway.push.metrics.GatewayMetrics() {
+                    @Override
+                    public void unauthenticatedFrameRejected() {
+                        unauthenticatedRejects.incrementAndGet();
+                    }
+                }));
+
+        channel.writeInbound(Frame.newBuilder()
+                .setType(Frame.Type.BIZ_REPORT)
+                .setReportData(ReportData.newBuilder().setMetric("temperature").build())
+                .build());
+
+        assertFalse(channel.isActive());
+        assertEquals(1, unauthenticatedRejects.get());
         channel.finishAndReleaseAll();
     }
 

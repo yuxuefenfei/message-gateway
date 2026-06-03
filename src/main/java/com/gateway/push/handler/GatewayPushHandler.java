@@ -59,8 +59,14 @@ public final class GatewayPushHandler extends SimpleChannelInboundHandler<Frame>
                 ctx.fireChannelRead(frame);
                 break;
             default:
-                log.debug("Ignore unsupported frame type: {}", frame.getType());
+                closeUnsupportedFrame(ctx, frame);
         }
+    }
+
+    private void closeUnsupportedFrame(ChannelHandlerContext ctx, Frame frame) {
+        metrics.unsupportedFrameRejected();
+        log.warn("Close channel for unsupported frame type: {}", frame.getType());
+        ctx.close();
     }
 
     private void handlePing(ChannelHandlerContext ctx, Frame frame) {

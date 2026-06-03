@@ -14,6 +14,9 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 服务端主动推送能力封装。
@@ -55,10 +58,12 @@ public final class PushService {
             frames.add(toNotifyFrame(notification));
         }
 
-        for (int i = 0; i < frames.size() - 1; i++) {
-            channel.get().write(frames.get(i));
+        List<ChannelFuture> futures = new ArrayList<>(frames.size());
+        for (Frame frame : frames) {
+            futures.add(channel.get().write(frame));
         }
-        return writeAndTrack(channel.get(), frames.get(frames.size() - 1), true);
+        channel.get().flush();
+        return trackBatchWrite(futures);
     }
 
     private Optional<Channel> writableChannel(String clientId) {
@@ -99,6 +104,37 @@ public final class PushService {
                 result.completeExceptionally(future.cause());
             }
         });
+        return result;
+    }
+
+    private CompletableFuture<Boolean> trackBatchWrite(List<ChannelFuture> futures) {
+        CompletableFuture<Boolean> result = new CompletableFuture<>();
+        AtomicInteger remaining = new AtomicInteger(futures.size());
+        AtomicBoolean failed = new AtomicBoolean(false);
+        AtomicReference<Throwable> firstCause = new AtomicReference<>();
+
+        for (ChannelFuture channelFuture : futures) {
+            channelFuture.addListener(future -> {
+                if (future.isSuccess()) {
+                    metrics.pushSucceeded();
+                } else {
+                    metrics.pushFailed();
+                    failed.set(true);
+                    firstCause.compareAndSet(null, future.cause());
+                }
+
+                if (remaining.decrementAndGet() == 0) {
+                    if (failed.get()) {
+                        Throwable cause = firstCause.get();
+                        result.completeExceptionally(cause == null
+                                ? new IllegalStateException("Batch push failed without cause")
+                                : cause);
+                    } else {
+                        result.complete(true);
+                    }
+                }
+            });
+        }
         return result;
     }
 }

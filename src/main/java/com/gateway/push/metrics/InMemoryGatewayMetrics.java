@@ -13,6 +13,7 @@ import java.util.concurrent.atomic.LongAdder;
 public final class InMemoryGatewayMetrics implements GatewayMetrics {
     private final LongAdder authenticatedChannels = new LongAdder();
     private final LongAdder unauthenticatedFrameRejects = new LongAdder();
+    private final LongAdder unsupportedFrameRejects = new LongAdder();
     private final LongAdder authTimeoutCloses = new LongAdder();
     private final LongAdder idleCloses = new LongAdder();
     private final LongAdder decodeFailures = new LongAdder();
@@ -30,6 +31,11 @@ public final class InMemoryGatewayMetrics implements GatewayMetrics {
     @Override
     public void unauthenticatedFrameRejected() {
         unauthenticatedFrameRejects.increment();
+    }
+
+    @Override
+    public void unsupportedFrameRejected() {
+        unsupportedFrameRejects.increment();
     }
 
     @Override
@@ -76,6 +82,7 @@ public final class InMemoryGatewayMetrics implements GatewayMetrics {
         return new Snapshot(
                 authenticatedChannels.sum(),
                 unauthenticatedFrameRejects.sum(),
+                unsupportedFrameRejects.sum(),
                 authTimeoutCloses.sum(),
                 idleCloses.sum(),
                 decodeFailures.sum(),
@@ -96,6 +103,7 @@ public final class InMemoryGatewayMetrics implements GatewayMetrics {
     public static class Snapshot {
         long authenticatedChannels;
         long unauthenticatedFrameRejects;
+        long unsupportedFrameRejects;
         long authTimeoutCloses;
         long idleCloses;
         long decodeFailures;

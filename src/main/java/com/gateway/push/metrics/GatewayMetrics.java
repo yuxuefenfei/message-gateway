@@ -19,6 +19,9 @@ public interface GatewayMetrics {
     default void unauthenticatedFrameRejected() {
     }
 
+    default void unsupportedFrameRejected() {
+    }
+
     default void authTimeoutClosed() {
     }
 

@@ -84,7 +84,13 @@ class PushServiceTest {
         SessionRegistry registry = new SessionRegistry();
         EmbeddedChannel channel = new EmbeddedChannel();
         registry.bind("client-batch", channel);
-        PushService pushService = new PushService(registry);
+        AtomicInteger pushSucceeded = new AtomicInteger();
+        PushService pushService = new PushService(registry, new GatewayMetrics() {
+            @Override
+            public void pushSucceeded() {
+                pushSucceeded.incrementAndGet();
+            }
+        });
 
         boolean sent = pushService.pushManyToClient("client-batch", List.of(
                 Notification.newBuilder().setTopic("topic-a").build(),
@@ -96,6 +102,7 @@ class PushServiceTest {
         assertTrue(sent);
         assertEquals("topic-a", first.getNotification().getTopic());
         assertEquals("topic-b", second.getNotification().getTopic());
+        assertEquals(2, pushSucceeded.get());
 
         channel.finishAndReleaseAll();
     }

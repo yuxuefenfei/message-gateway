@@ -11,6 +11,7 @@ class InMemoryGatewayMetricsTest {
 
         metrics.channelAuthenticated("client-a");
         metrics.unauthenticatedFrameRejected();
+        metrics.unsupportedFrameRejected();
         metrics.authTimeoutClosed();
         metrics.idleClosed();
         metrics.decodeFailed();
@@ -23,6 +24,7 @@ class InMemoryGatewayMetricsTest {
         InMemoryGatewayMetrics.Snapshot snapshot = metrics.snapshot();
         assertEquals(1, snapshot.getAuthenticatedChannels());
         assertEquals(1, snapshot.getUnauthenticatedFrameRejects());
+        assertEquals(1, snapshot.getUnsupportedFrameRejects());
         assertEquals(1, snapshot.getAuthTimeoutCloses());
         assertEquals(1, snapshot.getIdleCloses());
         assertEquals(1, snapshot.getDecodeFailures());

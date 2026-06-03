@@ -8,12 +8,13 @@ option java_outer_classname = "PushProtocol";
 
 message Frame {
   enum Type {
-    PING = 0;
-    PONG = 1;
-    CONNECT = 2;
-    CONNECT_ACK = 3;
-    NOTIFY = 4;
-    BIZ_REPORT = 5;
+    TYPE_UNSPECIFIED = 0;
+    PING = 1;
+    PONG = 2;
+    CONNECT = 3;
+    CONNECT_ACK = 4;
+    NOTIFY = 5;
+    BIZ_REPORT = 6;
   }
 
   Type type = 1;

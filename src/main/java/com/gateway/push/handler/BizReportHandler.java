@@ -8,6 +8,8 @@ import io.netty.channel.SimpleChannelInboundHandler;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.Optional;
+
 /**
  * 业务上报处理器。
  *
@@ -28,18 +30,26 @@ public final class BizReportHandler extends SimpleChannelInboundHandler<Frame> {
             return;
         }
 
-        String clientId = sessionRegistry.findClientId(ctx.channel()).orElseThrow();
+        Optional<String> clientId = sessionRegistry.findClientId(ctx.channel());
+        if (clientId.isEmpty()) {
+            metrics.unauthenticatedFrameRejected();
+            log.warn("Close channel for unauthenticated BIZ_REPORT: {}", ctx.channel().id());
+            ctx.close();
+            return;
+        }
+
         if (!frame.hasReportData()) {
-            log.warn("Client {} sent BIZ_REPORT without reportData", clientId);
+            metrics.bizReportFailed();
+            log.warn("Client {} sent BIZ_REPORT without reportData", clientId.get());
             return;
         }
 
         try {
-            bizReportSink.accept(clientId, frame.getReportData());
+            bizReportSink.accept(clientId.get(), frame.getReportData());
             metrics.bizReportAccepted();
         } catch (RuntimeException e) {
             metrics.bizReportFailed();
-            log.warn("Biz report sink failed: clientId={}, metric={}", clientId, frame.getReportData().getMetric(), e);
+            log.warn("Biz report sink failed: clientId={}, metric={}", clientId.get(), frame.getReportData().getMetric(), e);
         }
     }
 }
