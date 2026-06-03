@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+package com.gateway.push.protocol;
+
+option java_multiple_files = true;
+option java_package = "com.gateway.push.protocol";
+option java_outer_classname = "PushProtocol";
+
+message Frame {
+  enum Type {
+    PING = 0;
+    PONG = 1;
+    CONNECT = 2;
+    CONNECT_ACK = 3;
+    NOTIFY = 4;
+    BIZ_REPORT = 5;
+  }
+
+  Type type = 1;
+  int64 timestamp = 2;
+  string sequence_id = 3;
+
+  oneof body {
+    ConnectRequest connectRequest = 4;
+    ConnectResponse connectResponse = 5;
+    Notification notification = 6;
+    ReportData reportData = 7;
+  }
+}
+
+message ConnectRequest {
+  string token = 1;
+  string client_id = 2;
+  string client_version = 3;
+}
+
+message ConnectResponse {
+  int32 code = 1;
+  string msg = 2;
+}
+
+message Notification {
+  string topic = 1;
+  string biz_id = 2;
+  int32 priority = 3;
+  string title = 4;
+  bytes payload = 5;
+}
+
+message ReportData {
+  string metric = 1;
+  bytes data = 2;
+}
