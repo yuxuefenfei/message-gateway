@@ -106,4 +106,32 @@ class PushServiceTest {
 
         channel.finishAndReleaseAll();
     }
+
+    @Test
+    void stopsBetweenChunksWhenBackpressureAppears() throws Exception {
+        SessionRegistry registry = new SessionRegistry();
+        EmbeddedChannel channel = new EmbeddedChannel();
+        registry.bind("client-chunked", channel);
+        AtomicInteger backpressureRejects = new AtomicInteger();
+        PushService pushService = new PushService(registry, new GatewayMetrics() {
+            @Override
+            public void pushRejectedBackpressure() {
+                backpressureRejects.incrementAndGet();
+            }
+        }, 1);
+
+        java.util.concurrent.CompletableFuture<Boolean> sent = pushService.pushManyToClient(
+                "client-chunked",
+                List.of(
+                        Notification.newBuilder().setTopic("topic-a").build(),
+                        Notification.newBuilder().setTopic("topic-b").build()));
+        channel.unsafe().outboundBuffer().setUserDefinedWritability(1, false);
+        channel.runPendingTasks();
+
+        assertFalse(sent.get(5, TimeUnit.SECONDS));
+        assertEquals("topic-a", ((Frame) channel.readOutbound()).getNotification().getTopic());
+        assertEquals(1, backpressureRejects.get());
+        channel.unsafe().outboundBuffer().setUserDefinedWritability(1, true);
+        channel.finishAndReleaseAll();
+    }
 }

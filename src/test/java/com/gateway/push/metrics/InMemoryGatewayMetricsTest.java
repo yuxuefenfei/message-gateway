@@ -13,6 +13,9 @@ class InMemoryGatewayMetricsTest {
         metrics.unauthenticatedFrameRejected();
         metrics.unsupportedFrameRejected();
         metrics.authTimeoutClosed();
+        metrics.authFailed();
+        metrics.authTaskRejected();
+        metrics.businessTaskRejected();
         metrics.idleClosed();
         metrics.decodeFailed();
         metrics.bizReportAccepted();
@@ -26,6 +29,9 @@ class InMemoryGatewayMetricsTest {
         assertEquals(1, snapshot.getUnauthenticatedFrameRejects());
         assertEquals(1, snapshot.getUnsupportedFrameRejects());
         assertEquals(1, snapshot.getAuthTimeoutCloses());
+        assertEquals(1, snapshot.getAuthFailures());
+        assertEquals(1, snapshot.getAuthTaskRejects());
+        assertEquals(1, snapshot.getBusinessTaskRejects());
         assertEquals(1, snapshot.getIdleCloses());
         assertEquals(1, snapshot.getDecodeFailures());
         assertEquals(1, snapshot.getBizReportsAccepted());

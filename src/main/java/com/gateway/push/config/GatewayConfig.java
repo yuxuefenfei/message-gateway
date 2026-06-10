@@ -13,6 +13,7 @@ import java.time.Duration;
  */
 @Getter
 public final class GatewayConfig {
+    private static final int MIN_EXECUTOR_MAX_PENDING_TASKS = 16;
     /** 默认服务端口。 */
     private static final int DEFAULT_PORT = 8080;
     /** 默认 WebSocket 访问路径。 */
@@ -31,6 +32,14 @@ public final class GatewayConfig {
     private static final int DEFAULT_WRITE_BUFFER_HIGH_WATER_MARK = 64 * 1024;
     /** 业务处理线程数，至少为 2，避免高频上报阻塞 IO 线程。 */
     private static final int DEFAULT_BUSINESS_EXECUTOR_THREADS = Math.max(2, Runtime.getRuntime().availableProcessors());
+    /** 单个业务执行线程允许排队的最大任务数。 */
+    private static final int DEFAULT_BUSINESS_EXECUTOR_MAX_PENDING_TASKS = 4096;
+    /** 鉴权线程数，鉴权可能包含签名计算或远程调用。 */
+    private static final int DEFAULT_AUTH_EXECUTOR_THREADS = Math.max(2, Runtime.getRuntime().availableProcessors() / 2);
+    /** 单个鉴权执行线程允许排队的最大任务数。 */
+    private static final int DEFAULT_AUTH_EXECUTOR_MAX_PENDING_TASKS = 1024;
+    /** 批量推送每次写入事件循环的最大消息数。 */
+    private static final int DEFAULT_PUSH_BATCH_CHUNK_SIZE = 64;
 
     /** Netty 监听端口，0 表示由系统自动分配端口，主要用于测试。 */
     private final int port;
@@ -50,6 +59,14 @@ public final class GatewayConfig {
     private final int writeBufferHighWaterMark;
     /** 业务线程池线程数。 */
     private final int businessExecutorThreads;
+    /** 单个业务线程的最大待处理任务数。 */
+    private final int businessExecutorMaxPendingTasks;
+    /** 鉴权线程池线程数。 */
+    private final int authExecutorThreads;
+    /** 单个鉴权线程的最大待处理任务数。 */
+    private final int authExecutorMaxPendingTasks;
+    /** 批量推送分块大小。 */
+    private final int pushBatchChunkSize;
 
     public GatewayConfig(int port, String websocketPath, Duration readerIdleTimeout) {
         this(
@@ -61,7 +78,11 @@ public final class GatewayConfig {
                 DEFAULT_MAX_WEBSOCKET_FRAME_BYTES,
                 DEFAULT_WRITE_BUFFER_LOW_WATER_MARK,
                 DEFAULT_WRITE_BUFFER_HIGH_WATER_MARK,
-                DEFAULT_BUSINESS_EXECUTOR_THREADS
+                DEFAULT_BUSINESS_EXECUTOR_THREADS,
+                DEFAULT_BUSINESS_EXECUTOR_MAX_PENDING_TASKS,
+                DEFAULT_AUTH_EXECUTOR_THREADS,
+                DEFAULT_AUTH_EXECUTOR_MAX_PENDING_TASKS,
+                DEFAULT_PUSH_BATCH_CHUNK_SIZE
         );
     }
 
@@ -82,7 +103,11 @@ public final class GatewayConfig {
                 maxWebSocketFrameBytes,
                 DEFAULT_WRITE_BUFFER_LOW_WATER_MARK,
                 DEFAULT_WRITE_BUFFER_HIGH_WATER_MARK,
-                DEFAULT_BUSINESS_EXECUTOR_THREADS
+                DEFAULT_BUSINESS_EXECUTOR_THREADS,
+                DEFAULT_BUSINESS_EXECUTOR_MAX_PENDING_TASKS,
+                DEFAULT_AUTH_EXECUTOR_THREADS,
+                DEFAULT_AUTH_EXECUTOR_MAX_PENDING_TASKS,
+                DEFAULT_PUSH_BATCH_CHUNK_SIZE
         );
     }
 
@@ -97,6 +122,38 @@ public final class GatewayConfig {
             int writeBufferHighWaterMark,
             int businessExecutorThreads
     ) {
+        this(
+                port,
+                websocketPath,
+                readerIdleTimeout,
+                connectTimeout,
+                maxHttpContentLength,
+                maxWebSocketFrameBytes,
+                writeBufferLowWaterMark,
+                writeBufferHighWaterMark,
+                businessExecutorThreads,
+                DEFAULT_BUSINESS_EXECUTOR_MAX_PENDING_TASKS,
+                DEFAULT_AUTH_EXECUTOR_THREADS,
+                DEFAULT_AUTH_EXECUTOR_MAX_PENDING_TASKS,
+                DEFAULT_PUSH_BATCH_CHUNK_SIZE
+        );
+    }
+
+    public GatewayConfig(
+            int port,
+            String websocketPath,
+            Duration readerIdleTimeout,
+            Duration connectTimeout,
+            int maxHttpContentLength,
+            int maxWebSocketFrameBytes,
+            int writeBufferLowWaterMark,
+            int writeBufferHighWaterMark,
+            int businessExecutorThreads,
+            int businessExecutorMaxPendingTasks,
+            int authExecutorThreads,
+            int authExecutorMaxPendingTasks,
+            int pushBatchChunkSize
+    ) {
         this.port = port;
         this.websocketPath = websocketPath;
         this.readerIdleTimeout = readerIdleTimeout;
@@ -106,29 +163,50 @@ public final class GatewayConfig {
         this.writeBufferLowWaterMark = writeBufferLowWaterMark;
         this.writeBufferHighWaterMark = writeBufferHighWaterMark;
         this.businessExecutorThreads = businessExecutorThreads;
+        this.businessExecutorMaxPendingTasks = businessExecutorMaxPendingTasks;
+        this.authExecutorThreads = authExecutorThreads;
+        this.authExecutorMaxPendingTasks = authExecutorMaxPendingTasks;
+        this.pushBatchChunkSize = pushBatchChunkSize;
         validate();
     }
 
+    /**
+     * 从 JVM 系统属性读取配置，未提供的项目使用类内默认值。
+     *
+     * <p>时间配置统一使用毫秒，既覆盖生产常见的秒级超时，也支持集成测试和低延迟场景。</p>
+     */
     public static GatewayConfig fromSystemProperties() {
         int port = Integer.getInteger("gateway.port", DEFAULT_PORT);
         String websocketPath = System.getProperty("gateway.websocket.path", DEFAULT_WEBSOCKET_PATH);
-        long idleSeconds = Long.getLong("gateway.idle.seconds", DEFAULT_READER_IDLE_TIMEOUT.getSeconds());
-        long connectTimeoutSeconds = Long.getLong("gateway.connect.timeout.seconds", DEFAULT_CONNECT_TIMEOUT.getSeconds());
+        long idleMillis = Long.getLong("gateway.idle.millis", DEFAULT_READER_IDLE_TIMEOUT.toMillis());
+        long connectTimeoutMillis = Long.getLong("gateway.connect.timeout.millis", DEFAULT_CONNECT_TIMEOUT.toMillis());
         int maxHttpContentLength = Integer.getInteger("gateway.max.http.content.bytes", DEFAULT_MAX_HTTP_CONTENT_LENGTH);
         int maxWebSocketFrameBytes = Integer.getInteger("gateway.max.websocket.frame.bytes", DEFAULT_MAX_WEBSOCKET_FRAME_BYTES);
         int writeBufferLowWaterMark = Integer.getInteger("gateway.write.buffer.low.bytes", DEFAULT_WRITE_BUFFER_LOW_WATER_MARK);
         int writeBufferHighWaterMark = Integer.getInteger("gateway.write.buffer.high.bytes", DEFAULT_WRITE_BUFFER_HIGH_WATER_MARK);
         int businessExecutorThreads = Integer.getInteger("gateway.business.executor.threads", DEFAULT_BUSINESS_EXECUTOR_THREADS);
+        int businessExecutorMaxPendingTasks = Integer.getInteger(
+                "gateway.business.executor.max.pending.tasks",
+                DEFAULT_BUSINESS_EXECUTOR_MAX_PENDING_TASKS);
+        int authExecutorThreads = Integer.getInteger("gateway.auth.executor.threads", DEFAULT_AUTH_EXECUTOR_THREADS);
+        int authExecutorMaxPendingTasks = Integer.getInteger(
+                "gateway.auth.executor.max.pending.tasks",
+                DEFAULT_AUTH_EXECUTOR_MAX_PENDING_TASKS);
+        int pushBatchChunkSize = Integer.getInteger("gateway.push.batch.chunk.size", DEFAULT_PUSH_BATCH_CHUNK_SIZE);
         return new GatewayConfig(
                 port,
                 websocketPath,
-                Duration.ofSeconds(idleSeconds),
-                Duration.ofSeconds(connectTimeoutSeconds),
+                Duration.ofMillis(idleMillis),
+                Duration.ofMillis(connectTimeoutMillis),
                 maxHttpContentLength,
                 maxWebSocketFrameBytes,
                 writeBufferLowWaterMark,
                 writeBufferHighWaterMark,
-                businessExecutorThreads
+                businessExecutorThreads,
+                businessExecutorMaxPendingTasks,
+                authExecutorThreads,
+                authExecutorMaxPendingTasks,
+                pushBatchChunkSize
         );
     }
 
@@ -145,11 +223,17 @@ public final class GatewayConfig {
         if (websocketPath == null || websocketPath.isBlank() || !websocketPath.startsWith("/")) {
             throw new IllegalArgumentException("websocketPath must start with /");
         }
-        if (readerIdleTimeout == null || readerIdleTimeout.isNegative() || readerIdleTimeout.isZero()) {
-            throw new IllegalArgumentException("readerIdleTimeout must be positive");
+        if (readerIdleTimeout == null || readerIdleTimeout.compareTo(Duration.ofMillis(1)) < 0) {
+            throw new IllegalArgumentException("readerIdleTimeout must be at least 1 millisecond");
         }
-        if (connectTimeout == null || connectTimeout.isNegative() || connectTimeout.isZero()) {
-            throw new IllegalArgumentException("connectTimeout must be positive");
+        if (connectTimeout == null || connectTimeout.compareTo(Duration.ofMillis(1)) < 0) {
+            throw new IllegalArgumentException("connectTimeout must be at least 1 millisecond");
+        }
+        try {
+            readerIdleTimeout.toMillis();
+            connectTimeout.toMillis();
+        } catch (ArithmeticException e) {
+            throw new IllegalArgumentException("timeouts are too large", e);
         }
         if (maxHttpContentLength <= 0) {
             throw new IllegalArgumentException("maxHttpContentLength must be positive");
@@ -165,6 +249,18 @@ public final class GatewayConfig {
         }
         if (businessExecutorThreads <= 0) {
             throw new IllegalArgumentException("businessExecutorThreads must be positive");
+        }
+        if (businessExecutorMaxPendingTasks < MIN_EXECUTOR_MAX_PENDING_TASKS) {
+            throw new IllegalArgumentException("businessExecutorMaxPendingTasks must be at least 16");
+        }
+        if (authExecutorThreads <= 0) {
+            throw new IllegalArgumentException("authExecutorThreads must be positive");
+        }
+        if (authExecutorMaxPendingTasks < MIN_EXECUTOR_MAX_PENDING_TASKS) {
+            throw new IllegalArgumentException("authExecutorMaxPendingTasks must be at least 16");
+        }
+        if (pushBatchChunkSize <= 0) {
+            throw new IllegalArgumentException("pushBatchChunkSize must be positive");
         }
     }
 }

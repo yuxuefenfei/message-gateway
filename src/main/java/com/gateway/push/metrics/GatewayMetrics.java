@@ -25,6 +25,15 @@ public interface GatewayMetrics {
     default void authTimeoutClosed() {
     }
 
+    default void authFailed() {
+    }
+
+    default void authTaskRejected() {
+    }
+
+    default void businessTaskRejected() {
+    }
+
     default void idleClosed() {
     }
 

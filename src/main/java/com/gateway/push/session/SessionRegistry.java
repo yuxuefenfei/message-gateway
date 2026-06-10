@@ -1,9 +1,12 @@
 package com.gateway.push.session;
 
 import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
 import io.netty.util.AttributeKey;
 
 import java.util.Optional;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
@@ -82,9 +85,13 @@ public final class SessionRegistry {
      * <p>服务停机时调用，避免只关闭监听 socket 而遗留已经建立的客户端连接。</p>
      */
     public void closeAll() {
+        List<ChannelFuture> closeFutures = new ArrayList<>(sessions.size());
         for (Channel channel : sessions.values()) {
             channel.attr(CLIENT_ID_KEY).set(null);
-            channel.close();
+            closeFutures.add(channel.close());
+        }
+        for (ChannelFuture closeFuture : closeFutures) {
+            closeFuture.syncUninterruptibly();
         }
         sessions.clear();
         channelToClient.clear();

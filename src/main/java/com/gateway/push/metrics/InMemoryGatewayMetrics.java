@@ -15,6 +15,9 @@ public final class InMemoryGatewayMetrics implements GatewayMetrics {
     private final LongAdder unauthenticatedFrameRejects = new LongAdder();
     private final LongAdder unsupportedFrameRejects = new LongAdder();
     private final LongAdder authTimeoutCloses = new LongAdder();
+    private final LongAdder authFailures = new LongAdder();
+    private final LongAdder authTaskRejects = new LongAdder();
+    private final LongAdder businessTaskRejects = new LongAdder();
     private final LongAdder idleCloses = new LongAdder();
     private final LongAdder decodeFailures = new LongAdder();
     private final LongAdder bizReportsAccepted = new LongAdder();
@@ -41,6 +44,21 @@ public final class InMemoryGatewayMetrics implements GatewayMetrics {
     @Override
     public void authTimeoutClosed() {
         authTimeoutCloses.increment();
+    }
+
+    @Override
+    public void authFailed() {
+        authFailures.increment();
+    }
+
+    @Override
+    public void authTaskRejected() {
+        authTaskRejects.increment();
+    }
+
+    @Override
+    public void businessTaskRejected() {
+        businessTaskRejects.increment();
     }
 
     @Override
@@ -84,6 +102,9 @@ public final class InMemoryGatewayMetrics implements GatewayMetrics {
                 unauthenticatedFrameRejects.sum(),
                 unsupportedFrameRejects.sum(),
                 authTimeoutCloses.sum(),
+                authFailures.sum(),
+                authTaskRejects.sum(),
+                businessTaskRejects.sum(),
                 idleCloses.sum(),
                 decodeFailures.sum(),
                 bizReportsAccepted.sum(),
@@ -105,6 +126,9 @@ public final class InMemoryGatewayMetrics implements GatewayMetrics {
         long unauthenticatedFrameRejects;
         long unsupportedFrameRejects;
         long authTimeoutCloses;
+        long authFailures;
+        long authTaskRejects;
+        long businessTaskRejects;
         long idleCloses;
         long decodeFailures;
         long bizReportsAccepted;

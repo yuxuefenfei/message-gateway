@@ -7,6 +7,7 @@ import com.gateway.push.config.GatewayConfig;
 import com.gateway.push.protocol.ConnectRequest;
 import com.gateway.push.protocol.Frame;
 import com.gateway.push.protocol.ReportData;
+import com.gateway.push.metrics.GatewayMetrics;
 import com.google.protobuf.ByteString;
 import com.gateway.push.session.SessionRegistry;
 import io.netty.bootstrap.Bootstrap;
@@ -24,6 +25,9 @@ import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.websocketx.WebSocketClientHandshakerFactory;
 import io.netty.handler.codec.http.websocketx.WebSocketClientProtocolHandler;
 import io.netty.handler.codec.http.websocketx.WebSocketVersion;
+import io.netty.handler.codec.http.websocketx.BinaryWebSocketFrame;
+import io.netty.handler.codec.http.websocketx.ContinuationWebSocketFrame;
+import io.netty.buffer.Unpooled;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;
@@ -33,6 +37,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -128,7 +133,7 @@ class GatewayServerIntegrationTest {
                     .build()).sync();
 
             assertTrue(reportHandled.await(5, TimeUnit.SECONDS));
-            assertTrue(handlerThreadName.get().startsWith("defaultEventExecutorGroup"));
+            assertTrue(handlerThreadName.get().startsWith("gateway-business"));
 
             clientChannel.close().sync();
         } finally {
@@ -212,6 +217,196 @@ class GatewayServerIntegrationTest {
         } finally {
             server.stop();
         }
+    }
+
+    @Test
+    void aggregatesFragmentedBinaryWebSocketMessage() throws Exception {
+        SessionRegistry registry = new SessionRegistry();
+        GatewayServer server = new GatewayServer(
+                new GatewayConfig(0, "/ws", Duration.ofSeconds(30)),
+                registry,
+                TokenAuthenticator.nonBlankToken());
+        EventLoopGroup clientGroup = new NioEventLoopGroup(1);
+
+        try {
+            server.start();
+            TestClientHandler clientHandler = new TestClientHandler();
+            URI uri = URI.create("ws://127.0.0.1:" + server.getPort() + "/ws");
+            Channel clientChannel = connectClient(clientGroup, clientHandler, uri);
+            assertTrue(clientHandler.awaitHandshake());
+
+            byte[] payload = Frame.newBuilder()
+                    .setType(Frame.Type.CONNECT)
+                    .setSequenceId("fragmented-connect")
+                    .setConnectRequest(ConnectRequest.newBuilder()
+                            .setToken("token")
+                            .setClientId("client-fragmented")
+                            .build())
+                    .build()
+                    .toByteArray();
+            int split = payload.length / 2;
+            clientChannel.write(new BinaryWebSocketFrame(false, 0, Unpooled.wrappedBuffer(payload, 0, split)));
+            clientChannel.writeAndFlush(new ContinuationWebSocketFrame(
+                    true,
+                    0,
+                    Unpooled.wrappedBuffer(payload, split, payload.length - split))).sync();
+
+            assertEquals(200, clientHandler.takeFrame().getConnectResponse().getCode());
+            assertTrue(registry.findChannel("client-fragmented").isPresent());
+            clientChannel.close().sync();
+        } finally {
+            clientGroup.shutdownGracefully(0, 5, TimeUnit.SECONDS).sync();
+            server.stop();
+        }
+    }
+
+    @Test
+    void closesAuthenticatedConnectionAfterSubSecondReaderIdleTimeout() throws Exception {
+        GatewayServer server = new GatewayServer(
+                new GatewayConfig(0, "/ws", Duration.ofMillis(150)),
+                new SessionRegistry(),
+                TokenAuthenticator.nonBlankToken());
+        EventLoopGroup clientGroup = new NioEventLoopGroup(1);
+
+        try {
+            server.start();
+            TestClientHandler clientHandler = new TestClientHandler();
+            URI uri = URI.create("ws://127.0.0.1:" + server.getPort() + "/ws");
+            Channel clientChannel = connectClient(clientGroup, clientHandler, uri);
+            assertTrue(clientHandler.awaitHandshake());
+            clientChannel.writeAndFlush(Frame.newBuilder()
+                    .setType(Frame.Type.CONNECT)
+                    .setSequenceId("connect-idle")
+                    .setConnectRequest(ConnectRequest.newBuilder()
+                            .setToken("token")
+                            .setClientId("client-idle")
+                            .build())
+                    .build()).sync();
+            assertEquals(200, clientHandler.takeFrame().getConnectResponse().getCode());
+
+            assertTrue(clientHandler.awaitClose());
+        } finally {
+            clientGroup.shutdownGracefully(0, 5, TimeUnit.SECONDS).sync();
+            server.stop();
+        }
+    }
+
+    @Test
+    void authenticatesOutsideNettyIoThread() throws Exception {
+        AtomicReference<String> authThreadName = new AtomicReference<>();
+        GatewayServer server = new GatewayServer(
+                new GatewayConfig(0, "/ws", Duration.ofSeconds(30)),
+                new SessionRegistry(),
+                request -> {
+                    authThreadName.set(Thread.currentThread().getName());
+                    return true;
+                });
+        EventLoopGroup clientGroup = new NioEventLoopGroup(1);
+
+        try {
+            server.start();
+            TestClientHandler clientHandler = new TestClientHandler();
+            URI uri = URI.create("ws://127.0.0.1:" + server.getPort() + "/ws");
+            Channel clientChannel = connectClient(clientGroup, clientHandler, uri);
+            assertTrue(clientHandler.awaitHandshake());
+            clientChannel.writeAndFlush(Frame.newBuilder()
+                    .setType(Frame.Type.CONNECT)
+                    .setSequenceId("connect-async-auth")
+                    .setConnectRequest(ConnectRequest.newBuilder()
+                            .setToken("token")
+                            .setClientId("client-async-auth")
+                            .build())
+                    .build()).sync();
+
+            assertEquals(200, clientHandler.takeFrame().getConnectResponse().getCode());
+            assertTrue(authThreadName.get().startsWith("gateway-auth"));
+            clientChannel.close().sync();
+        } finally {
+            clientGroup.shutdownGracefully(0, 5, TimeUnit.SECONDS).sync();
+            server.stop();
+        }
+    }
+
+    @Test
+    void rejectsBizReportWhenBoundedBusinessQueueIsFull() throws Exception {
+        CountDownLatch sinkEntered = new CountDownLatch(1);
+        CountDownLatch releaseSink = new CountDownLatch(1);
+        CountDownLatch taskRejected = new CountDownLatch(1);
+        AtomicInteger rejectedTasks = new AtomicInteger();
+        GatewayMetrics metrics = new GatewayMetrics() {
+            @Override
+            public void businessTaskRejected() {
+                rejectedTasks.incrementAndGet();
+                taskRejected.countDown();
+            }
+        };
+        GatewayConfig config = new GatewayConfig(
+                0,
+                "/ws",
+                Duration.ofSeconds(30),
+                Duration.ofSeconds(10),
+                64 * 1024,
+                64 * 1024,
+                32 * 1024,
+                64 * 1024,
+                1,
+                16,
+                1,
+                16,
+                64);
+        GatewayServer server = new GatewayServer(
+                config,
+                new SessionRegistry(),
+                TokenAuthenticator.nonBlankToken(),
+                (clientId, reportData) -> {
+                    sinkEntered.countDown();
+                    try {
+                        releaseSink.await(5, TimeUnit.SECONDS);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                },
+                metrics);
+        EventLoopGroup clientGroup = new NioEventLoopGroup(1);
+
+        try {
+            server.start();
+            TestClientHandler clientHandler = new TestClientHandler();
+            URI uri = URI.create("ws://127.0.0.1:" + server.getPort() + "/ws");
+            Channel clientChannel = connectClient(clientGroup, clientHandler, uri);
+            assertTrue(clientHandler.awaitHandshake());
+            clientChannel.writeAndFlush(Frame.newBuilder()
+                    .setType(Frame.Type.CONNECT)
+                    .setConnectRequest(ConnectRequest.newBuilder()
+                            .setToken("token")
+                            .setClientId("client-overload")
+                            .build())
+                    .build()).sync();
+            assertEquals(200, clientHandler.takeFrame().getConnectResponse().getCode());
+
+            clientChannel.writeAndFlush(reportFrame("first")).sync();
+            assertTrue(sinkEntered.await(5, TimeUnit.SECONDS));
+            for (int i = 0; i < 17; i++) {
+                clientChannel.write(reportFrame("queued-" + i));
+            }
+            clientChannel.flush();
+
+            assertTrue(taskRejected.await(5, TimeUnit.SECONDS));
+            assertTrue(rejectedTasks.get() >= 1);
+            releaseSink.countDown();
+            clientChannel.close().sync();
+        } finally {
+            releaseSink.countDown();
+            clientGroup.shutdownGracefully(0, 5, TimeUnit.SECONDS).sync();
+            server.stop();
+        }
+    }
+
+    private static Frame reportFrame(String metric) {
+        return Frame.newBuilder()
+                .setType(Frame.Type.BIZ_REPORT)
+                .setReportData(ReportData.newBuilder().setMetric(metric).build())
+                .build();
     }
 
     private static Channel connectClient(

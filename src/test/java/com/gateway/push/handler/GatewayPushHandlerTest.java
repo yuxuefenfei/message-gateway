@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.RejectedExecutionException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -152,6 +153,39 @@ class GatewayPushHandlerTest {
 
         assertFalse(channel.isActive());
         assertEquals(1, unsupportedRejects.get());
+        channel.finishAndReleaseAll();
+    }
+
+    @Test
+    void returnsServiceUnavailableWhenAuthExecutorRejectsTask() {
+        SessionRegistry registry = new SessionRegistry();
+        AtomicInteger authRejects = new AtomicInteger();
+        EmbeddedChannel channel = new EmbeddedChannel(new GatewayPushHandler(
+                registry,
+                TokenAuthenticator.nonBlankToken(),
+                new com.gateway.push.metrics.GatewayMetrics() {
+                    @Override
+                    public void authTaskRejected() {
+                        authRejects.incrementAndGet();
+                    }
+                },
+                command -> {
+                    throw new RejectedExecutionException("full");
+                }));
+
+        channel.writeInbound(Frame.newBuilder()
+                .setType(Frame.Type.CONNECT)
+                .setSequenceId("connect-busy")
+                .setConnectRequest(ConnectRequest.newBuilder()
+                        .setClientId("client-busy")
+                        .setToken("token")
+                        .build())
+                .build());
+
+        Frame ack = channel.readOutbound();
+        assertEquals(503, ack.getConnectResponse().getCode());
+        assertEquals(1, authRejects.get());
+        assertFalse(channel.isActive());
         channel.finishAndReleaseAll();
     }
 

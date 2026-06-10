@@ -20,12 +20,17 @@ class GatewayConfigTest {
         assertEquals(64 * 1024, config.getMaxWebSocketFrameBytes());
         assertEquals(32 * 1024, config.getWriteBufferLowWaterMark());
         assertEquals(64 * 1024, config.getWriteBufferHighWaterMark());
+        assertEquals(4096, config.getBusinessExecutorMaxPendingTasks());
+        assertEquals(1024, config.getAuthExecutorMaxPendingTasks());
+        assertEquals(64, config.getPushBatchChunkSize());
     }
 
     @Test
     void rejectsInvalidLimitsAndTimeouts() {
         assertThrows(IllegalArgumentException.class,
                 () -> new GatewayConfig(8080, "/ws", Duration.ZERO));
+        assertThrows(IllegalArgumentException.class,
+                () -> new GatewayConfig(8080, "/ws", Duration.ofNanos(1)));
         assertThrows(IllegalArgumentException.class,
                 () -> new GatewayConfig(8080, "ws", Duration.ofSeconds(90)));
         assertThrows(IllegalArgumentException.class,
@@ -73,6 +78,20 @@ class GatewayConfigTest {
                         64 * 1024,
                         8,
                         16,
-                        0));
+                0));
+    }
+
+    @Test
+    void readsMillisecondTimeoutProperties() {
+        System.setProperty("gateway.idle.millis", "150");
+        System.setProperty("gateway.connect.timeout.millis", "250");
+        try {
+            GatewayConfig config = GatewayConfig.fromSystemProperties();
+            assertEquals(Duration.ofMillis(150), config.getReaderIdleTimeout());
+            assertEquals(Duration.ofMillis(250), config.getConnectTimeout());
+        } finally {
+            System.clearProperty("gateway.idle.millis");
+            System.clearProperty("gateway.connect.timeout.millis");
+        }
     }
 }

@@ -9,13 +9,14 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.Optional;
+import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 
 /**
  * 业务上报处理器。
  *
- * <p>该 handler 只处理 BIZ_REPORT 帧，并在 pipeline 中被挂载到独立业务线程池。
- * 这样即使后续的 BizReportSink 接入 Kafka、队列或其它业务系统，也不会阻塞
- * Netty IO 线程上的心跳、鉴权与网络读写。</p>
+ * <p>该 handler 在 IO 线程完成轻量校验，再把 BizReportSink 调用投递到独立有界线程池。
+ * 这样既不会阻塞 Netty IO 线程，也不会让连接生命周期事件参与业务队列竞争。</p>
  */
 @Slf4j
 @RequiredArgsConstructor
@@ -23,6 +24,15 @@ public final class BizReportHandler extends SimpleChannelInboundHandler<Frame> {
     private final SessionRegistry sessionRegistry;
     private final BizReportSink bizReportSink;
     private final GatewayMetrics metrics;
+    private final Executor businessExecutor;
+
+    public BizReportHandler(
+            SessionRegistry sessionRegistry,
+            BizReportSink bizReportSink,
+            GatewayMetrics metrics
+    ) {
+        this(sessionRegistry, bizReportSink, metrics, Runnable::run);
+    }
 
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, Frame frame) {
@@ -45,11 +55,22 @@ public final class BizReportHandler extends SimpleChannelInboundHandler<Frame> {
         }
 
         try {
-            bizReportSink.accept(clientId.get(), frame.getReportData());
+            // 这里只提交业务任务，不把 handler 本身挂到业务池，避免连接生命周期事件排队。
+            businessExecutor.execute(() -> acceptReport(clientId.get(), frame));
+        } catch (RejectedExecutionException e) {
+            metrics.businessTaskRejected();
+            log.warn("Drop biz report because business executor is full: clientId={}, metric={}",
+                    clientId.get(), frame.getReportData().getMetric());
+        }
+    }
+
+    private void acceptReport(String clientId, Frame frame) {
+        try {
+            bizReportSink.accept(clientId, frame.getReportData());
             metrics.bizReportAccepted();
         } catch (RuntimeException e) {
             metrics.bizReportFailed();
-            log.warn("Biz report sink failed: clientId={}, metric={}", clientId.get(), frame.getReportData().getMetric(), e);
+            log.warn("Biz report sink failed: clientId={}, metric={}", clientId, frame.getReportData().getMetric(), e);
         }
     }
 }
