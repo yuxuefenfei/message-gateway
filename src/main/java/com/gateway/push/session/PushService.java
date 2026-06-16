@@ -119,6 +119,7 @@ public final class PushService {
 
     private CompletableFuture<Boolean> writeAndTrack(Channel channel, Frame frame, boolean flush) {
         CompletableFuture<Boolean> result = new CompletableFuture<>();
+        // Netty 的 write 是异步的，返回 ChannelFuture；数据真正写成功或失败要通过 listener 得知。
         ChannelFuture channelFuture = flush ? channel.writeAndFlush(frame) : channel.write(frame);
         channelFuture.addListener(future -> {
             if (future.isSuccess()) {
@@ -134,6 +135,7 @@ public final class PushService {
 
     private CompletableFuture<Boolean> trackBatchWrite(List<ChannelFuture> futures) {
         CompletableFuture<Boolean> result = new CompletableFuture<>();
+        // 一个批次里有多次 write，需要等所有 ChannelFuture 都完成后，才能决定本批整体结果。
         AtomicInteger remaining = new AtomicInteger(futures.size());
         AtomicBoolean failed = new AtomicBoolean(false);
         AtomicReference<Throwable> firstCause = new AtomicReference<>();
@@ -206,6 +208,7 @@ public final class PushService {
                 } else {
                     try {
                         if (notifications.hasNext()) {
+                            // 后续分块重新投递回 Channel 的 EventLoop，让批量推送和该连接其它 IO 事件串行执行。
                             channel.eventLoop().execute(() -> writeNextChunk(channel, notifications, result));
                         } else {
                             result.complete(true);

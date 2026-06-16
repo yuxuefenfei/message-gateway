@@ -30,6 +30,8 @@ public final class WebSocketProtobufDecoder extends MessageToMessageDecoder<Bina
 
     @Override
     protected void decode(ChannelHandlerContext ctx, BinaryWebSocketFrame frame, List<Object> out) throws Exception {
+        // BinaryWebSocketFrame 是 Netty 对 WebSocket 二进制消息的封装；真正的协议字节在 content() 的 ByteBuf 里。
+        // MessageToMessageDecoder 会在本方法返回后释放入站 frame，因此不要把 content 长期保存到别的线程。
         ByteBuf content = frame.content();
         if (!content.isReadable()) {
             return;
@@ -37,12 +39,14 @@ public final class WebSocketProtobufDecoder extends MessageToMessageDecoder<Bina
 
         try {
             if (content.nioBufferCount() == 1) {
+                // 单段 ByteBuf 可以直接暴露成 ByteBuffer，让 Protobuf 从 Netty 缓冲区读取，少一次 byte[] 拷贝。
                 ByteBuffer byteBuffer = content.nioBuffer();
                 CodedInputStream input = CodedInputStream.newInstance(byteBuffer);
                 out.add(Frame.parseFrom(input));
                 return;
             }
 
+            // Composite ByteBuf 可能由多个内存片段组成，用 InputStream 适配器交给 Protobuf 顺序读取。
             try (ByteBufInputStream input = new ByteBufInputStream(content, false)) {
                 out.add(Frame.parseFrom(input));
             }

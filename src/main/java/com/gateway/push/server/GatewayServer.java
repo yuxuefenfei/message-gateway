@@ -84,8 +84,11 @@ public final class GatewayServer {
 
         try {
             // 所有线程组都放在异常保护内创建，任一步失败都能由 stop() 回收已创建资源。
+            // bossGroup 只负责 accept 新 TCP 连接；workerGroup 负责每条连接上的读写事件和 pipeline 执行。
             bossGroup = new NioEventLoopGroup(1);
             workerGroup = new NioEventLoopGroup();
+            // DefaultEventExecutorGroup 是 Netty 提供的普通任务线程池。
+            // 这里给业务上报和鉴权分别建有界队列，队列满时明确拒绝，避免请求无限堆积。
             businessExecutorGroup = new DefaultEventExecutorGroup(
                     config.getBusinessExecutorThreads(),
                     new DefaultThreadFactory("gateway-business"),
@@ -103,6 +106,7 @@ public final class GatewayServer {
 
             ServerBootstrap bootstrap = new ServerBootstrap()
                     .group(bossGroup, workerGroup)
+                    // NIO 版本的服务端 Channel，底层使用 Java Selector 处理非阻塞网络 IO。
                     .channel(NioServerSocketChannel.class)
                     .childHandler(new GatewayChannelInitializer(
                             config,
@@ -114,9 +118,11 @@ public final class GatewayServer {
                             authExecutorGroup))
                     .option(ChannelOption.SO_BACKLOG, 1024)
                     .option(ChannelOption.SO_REUSEADDR, true)
+                    // childOption 作用于每个客户端连接；option 作用于服务端监听 socket。
                     .childOption(ChannelOption.ALLOCATOR, PooledByteBufAllocator.DEFAULT)
                     .childOption(ChannelOption.SO_KEEPALIVE, true)
                     .childOption(ChannelOption.TCP_NODELAY, true)
+                    // 写缓冲水位会影响 Channel.isWritable()，PushService 用它判断是否触发背压。
                     .childOption(ChannelOption.WRITE_BUFFER_WATER_MARK, new WriteBufferWaterMark(
                             config.getWriteBufferLowWaterMark(),
                             config.getWriteBufferHighWaterMark()));

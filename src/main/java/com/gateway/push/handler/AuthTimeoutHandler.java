@@ -38,6 +38,8 @@ public final class AuthTimeoutHandler extends ChannelInboundHandlerAdapter {
     @Override
     public void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception {
         if (evt instanceof WebSocketServerProtocolHandler.HandshakeComplete) {
+            // HandshakeComplete 是 WebSocketServerProtocolHandler 在 HTTP Upgrade 成功后抛出的用户事件。
+            // 这里使用当前 Channel 的 EventLoop 定时，定时任务天然和该连接的其它 IO 事件串行执行。
             timeoutFuture = ctx.executor().schedule(() -> {
                 if (ctx.channel().isActive() && sessionRegistry.findClientId(ctx.channel()).isEmpty()) {
                     metrics.authTimeoutClosed();

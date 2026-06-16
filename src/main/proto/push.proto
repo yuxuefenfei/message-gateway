@@ -2,12 +2,19 @@ syntax = "proto3";
 
 package com.gateway.push.protocol;
 
+// 这三个 option 决定 protoc 生成 Java 代码的位置和文件形态：
+// - java_multiple_files=true：每个 message 生成独立 Java 类，业务代码可以直接 import Frame/Notification。
+// - java_package：生成类所在的 Java 包名，不一定要和 proto package 完全一致。
+// - java_outer_classname：仍会生成一个外层 PushProtocol 类，用来承载描述符等元数据。
 option java_multiple_files = true;
 option java_package = "com.gateway.push.protocol";
 option java_outer_classname = "PushProtocol";
 
+// Frame 是 WebSocket 二进制消息里的顶层信封。
+// 所有客户端和服务端消息都先解析成 Frame，再根据 type 和 body 分发到具体业务。
 message Frame {
   enum Type {
+    // proto3 的枚举默认值必须是 0；显式保留 UNSPECIFIED 可以避免把默认值误认为有效业务类型。
     TYPE_UNSPECIFIED = 0;
     PING = 1;
     PONG = 2;
@@ -21,6 +28,8 @@ message Frame {
   int64 timestamp = 2;
   string sequence_id = 3;
 
+  // oneof 表示同一个 Frame 只允许携带一种业务体。
+  // 例如 type=CONNECT 时应填写 connectRequest，type=NOTIFY 时应填写 notification。
   oneof body {
     ConnectRequest connectRequest = 4;
     ConnectResponse connectResponse = 5;

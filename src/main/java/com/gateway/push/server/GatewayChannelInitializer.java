@@ -85,21 +85,31 @@ public final class GatewayChannelInitializer extends ChannelInitializer<SocketCh
 
     @Override
     protected void initChannel(SocketChannel ch) {
+        // ChannelPipeline 可以理解为一条处理链：
+        // 入站数据从上往下流动（TCP bytes -> HTTP -> WebSocketFrame -> Protobuf Frame -> 业务 handler），
+        // 出站写入反向经过编码器（业务 Frame -> BinaryWebSocketFrame -> bytes）。
         ch.pipeline()
+                // IdleStateHandler 只负责产生“读空闲”事件，真正关闭连接的逻辑在 GatewayPushHandler。
                 .addLast(new IdleStateHandler(config.getReaderIdleTimeout().toMillis(), 0, 0, TimeUnit.MILLISECONDS))
+                // HTTP codec 和 aggregator 只服务 WebSocket 握手阶段，握手本身仍是一次 HTTP Upgrade 请求。
                 .addLast(new HttpServerCodec())
                 .addLast(new HttpObjectAggregator(config.getMaxHttpContentLength()))
+                // 完成 /ws 路径校验、HTTP Upgrade 和 WebSocket 协议控制帧处理。
                 .addLast(new WebSocketServerProtocolHandler(
                         config.getWebsocketPath(),
                         null,
                         true,
                         config.getMaxWebSocketFrameBytes()))
+                // 客户端可能把一条二进制消息拆成多个 WebSocket 分片；这里聚合后再交给 Protobuf 解码。
                 .addLast(new WebSocketFrameAggregator(config.getMaxWebSocketFrameBytes()))
                 .addLast(new AuthTimeoutHandler(sessionRegistry, config.getConnectTimeout(), metrics))
+                // 从这里开始，后面的业务 handler 看到的就是项目自己的 Protobuf Frame 对象。
                 .addLast(new WebSocketProtobufDecoder(metrics))
                 .addLast(new WebSocketProtobufEncoder())
                 .addLast(new GatewayPushHandler(sessionRegistry, authenticator, metrics, authExecutor));
 
+        // BizReportHandler 放在最后，只接收 GatewayPushHandler 主动 fireChannelRead 的 BIZ_REPORT。
+        // 传入 EventExecutorGroup 后，该 handler 的事件会切到业务线程池，和 Netty IO 线程隔离。
         ch.pipeline().addLast(new BizReportHandler(
                 sessionRegistry,
                 bizReportSink,

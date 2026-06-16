@@ -21,9 +21,12 @@ import java.util.concurrent.ConcurrentMap;
  * 避免每个业务帧都查 ConcurrentHashMap。</p>
  */
 public final class SessionRegistry {
+    // AttributeKey 是 Netty 给每个 Channel 挂载本地状态的方式，类似“连接对象上的线程安全小标签”。
     private static final AttributeKey<String> CLIENT_ID_KEY = AttributeKey.valueOf("gateway.clientId");
 
+    // clientId -> Channel：服务端主动推送时使用。
     private final ConcurrentMap<String, Channel> sessions = new ConcurrentHashMap<>();
+    // Channel -> clientId：连接断开时反向找到 clientId，用于清理 sessions。
     private final ConcurrentMap<Channel, String> channelToClient = new ConcurrentHashMap<>();
 
     /**
@@ -34,11 +37,13 @@ public final class SessionRegistry {
      * 或协议异常导致脏会话残留。</p>
      */
     public void bind(String clientId, Channel channel) {
+        // 先建立反向映射，再处理正向映射。这样即使旧 Channel 被关闭，channelInactive 也能找到应清理的 clientId。
         String previousClientId = channelToClient.put(channel, clientId);
         if (previousClientId != null && !previousClientId.equals(clientId)) {
             sessions.remove(previousClientId, channel);
         }
 
+        // sessions.put 返回同 clientId 的旧连接；网关采用“新连接踢旧连接”的策略。
         Channel oldChannel = sessions.put(clientId, channel);
         if (oldChannel != null && oldChannel != channel) {
             channelToClient.remove(oldChannel, clientId);

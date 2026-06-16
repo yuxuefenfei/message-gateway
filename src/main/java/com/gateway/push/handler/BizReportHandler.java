@@ -36,6 +36,7 @@ public final class BizReportHandler extends SimpleChannelInboundHandler<Frame> {
 
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, Frame frame) {
+        // 理论上只有 GatewayPushHandler 放行的 BIZ_REPORT 会到这里；保留类型判断让 handler 更稳妥。
         if (frame.getType() != Frame.Type.BIZ_REPORT) {
             return;
         }
@@ -56,6 +57,7 @@ public final class BizReportHandler extends SimpleChannelInboundHandler<Frame> {
 
         try {
             // 这里只提交业务任务，不把 handler 本身挂到业务池，避免连接生命周期事件排队。
+            // 队列满时拒绝本次上报，比阻塞 Netty IO 线程或无限堆积内存更可控。
             businessExecutor.execute(() -> acceptReport(clientId.get(), frame));
         } catch (RejectedExecutionException e) {
             metrics.businessTaskRejected();
@@ -66,6 +68,7 @@ public final class BizReportHandler extends SimpleChannelInboundHandler<Frame> {
 
     private void acceptReport(String clientId, Frame frame) {
         try {
+            // 真正的业务落地由 BizReportSink 实现，网关核心只负责鉴权、限流和投递。
             bizReportSink.accept(clientId, frame.getReportData());
             metrics.bizReportAccepted();
         } catch (RuntimeException e) {

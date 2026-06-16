@@ -216,6 +216,7 @@ public final class GatewayConfig {
      * <p>这些校验尽量在服务启动前失败，而不是等到 Netty bind 或 handler 初始化阶段才暴露。
      * 对网关这类长连接服务来说，启动即失败比半启动状态更容易排查。</p>
      */
+    @SuppressWarnings("ResultOfMethodCallIgnored")
     private void validate() {
         if (port < 0 || port > 65535) {
             throw new IllegalArgumentException("port must be between 0 and 65535");

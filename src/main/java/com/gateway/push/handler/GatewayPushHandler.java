@@ -55,6 +55,7 @@ public final class GatewayPushHandler extends SimpleChannelInboundHandler<Frame>
 
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, Frame frame) {
+        // CONNECT 是业务层登录帧。除 CONNECT 外，任何业务帧都必须在 SessionRegistry 中找到 clientId。
         if (frame.getType() != Frame.Type.CONNECT && sessionRegistry.findClientId(ctx.channel()).isEmpty()) {
             metrics.unauthenticatedFrameRejected();
             log.warn("Close unauthenticated channel for frame type: {}", frame.getType());
@@ -70,6 +71,7 @@ public final class GatewayPushHandler extends SimpleChannelInboundHandler<Frame>
                 handleConnect(ctx, frame);
                 break;
             case BIZ_REPORT:
+                // 当前 handler 不处理上报内容，只把消息继续传给 pipeline 后面的 BizReportHandler。
                 ctx.fireChannelRead(frame);
                 break;
             default:
@@ -84,6 +86,7 @@ public final class GatewayPushHandler extends SimpleChannelInboundHandler<Frame>
     }
 
     private void handlePing(ChannelHandlerContext ctx, Frame frame) {
+        // sequence_id 原样带回，方便客户端把 PING 和 PONG 对上，用于测延迟或排查丢包。
         Frame pong = Frame.newBuilder()
                 .setType(Frame.Type.PONG)
                 .setTimestamp(Instant.now().toEpochMilli())
@@ -93,6 +96,7 @@ public final class GatewayPushHandler extends SimpleChannelInboundHandler<Frame>
     }
 
     private void handleConnect(ChannelHandlerContext ctx, Frame frame) {
+        // 同一条 WebSocket 连接只允许绑定一次身份；重复 CONNECT 直接关闭，避免会话状态变复杂。
         if (sessionRegistry.findClientId(ctx.channel()).isPresent()) {
             writeConnectAck(ctx, frame.getSequenceId(), 409, "ALREADY_CONNECTED")
                     .addListener(ChannelFutureListener.CLOSE);
@@ -126,6 +130,7 @@ public final class GatewayPushHandler extends SimpleChannelInboundHandler<Frame>
         // 鉴权完成前暂停继续读取，避免同一连接上的后续业务帧越过认证边界。
         ctx.channel().config().setAutoRead(false);
         try {
+            // 鉴权可能比较慢，放到独立线程池；但 Netty 的 Channel 状态必须回到 EventLoop 线程里改。
             authExecutor.execute(() -> {
                 boolean authenticated = false;
                 Throwable failure = null;
@@ -138,6 +143,8 @@ public final class GatewayPushHandler extends SimpleChannelInboundHandler<Frame>
                 boolean result = authenticated;
                 Throwable cause = failure;
                 try {
+                    // ctx.executor() 就是当前 Channel 绑定的 EventLoop。
+                    // 通过它切回来，可以避免多个线程同时操作 pipeline、Channel 配置和 SessionRegistry 绑定过程。
                     ctx.executor().execute(() -> completeAuthentication(ctx, sequenceId, request, result, cause));
                 } catch (RejectedExecutionException ignored) {
                     // 连接或服务正在关闭时，IO EventLoop 可能已经拒绝回调，无需继续写响应。
@@ -175,6 +182,7 @@ public final class GatewayPushHandler extends SimpleChannelInboundHandler<Frame>
 
         sessionRegistry.bind(request.getClientId(), ctx.channel());
         metrics.channelAuthenticated(request.getClientId());
+        // 鉴权成功后不再需要 CONNECT 超时保护，移除 handler 会触发其 handlerRemoved 并取消定时任务。
         removeAuthTimeoutHandler(ctx);
         writeConnectAck(ctx, sequenceId, 200, "SUCCESS");
         ctx.channel().config().setAutoRead(true);
@@ -203,6 +211,7 @@ public final class GatewayPushHandler extends SimpleChannelInboundHandler<Frame>
 
     @Override
     public void userEventTriggered(ChannelHandlerContext ctx, Object evt) throws Exception {
+        // IdleStateHandler 发现长时间没有读到数据时会发出 IdleStateEvent，而不是直接关闭连接。
         if (evt instanceof IdleStateEvent && ((IdleStateEvent) evt).state() == IdleState.READER_IDLE) {
             metrics.idleClosed();
             log.warn("Close idle channel: {}", ctx.channel().id());
