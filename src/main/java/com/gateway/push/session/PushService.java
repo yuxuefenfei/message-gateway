@@ -1,19 +1,14 @@
 package com.gateway.push.session;
 
+import com.gateway.push.config.GatewayConfig;
+import com.gateway.push.metrics.GatewayMetrics;
 import com.gateway.push.protocol.Frame;
 import com.gateway.push.protocol.Notification;
-import com.gateway.push.metrics.GatewayMetrics;
-import com.gateway.push.config.GatewayConfig;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Optional;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -61,11 +56,10 @@ public final class PushService {
      */
     public CompletableFuture<Boolean> pushToClient(String clientId, Notification notification) {
         Optional<Channel> channel = writableChannel(clientId);
-        if (channel.isEmpty()) {
-            return CompletableFuture.completedFuture(false);
-        }
+        return channel
+                .map(value -> writeAndTrack(value, toNotifyFrame(notification), true))
+                .orElseGet(() -> CompletableFuture.completedFuture(false));
 
-        return writeAndTrack(channel.get(), toNotifyFrame(notification), true);
     }
 
     /**
@@ -117,6 +111,7 @@ public final class PushService {
                 .build();
     }
 
+    @SuppressWarnings("SameParameterValue")
     private CompletableFuture<Boolean> writeAndTrack(Channel channel, Frame frame, boolean flush) {
         CompletableFuture<Boolean> result = new CompletableFuture<>();
         // Netty 的 write 是异步的，返回 ChannelFuture；数据真正写成功或失败要通过 listener 得知。
